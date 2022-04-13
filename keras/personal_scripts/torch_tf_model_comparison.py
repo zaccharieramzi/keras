@@ -227,17 +227,16 @@ def ResNet34(include_top=True,
         **kwargs,
     )
 
-tf_resnet18 = ResNet18(weights=None, use_bias=True, input_shape=(224, 224, 3))
-tf_resnet34 = ResNet34(weights=None, use_bias=True, input_shape=(224, 224, 3))
+tf_resnet18 = ResNet18(weights='resnet18.h5', use_bias=True, input_shape=(224, 224, 3))
+tf_resnet34 = ResNet34(weights='resnet34.h5', use_bias=True, input_shape=(224, 224, 3))
 
 for torch_model, tf_model in zip(
     [torch_resnet18, torch_resnet34],
     [tf_resnet18, tf_resnet34],
 ):
-    tf_model.load_weights(f'{tf_model.name}.h5')
     example_input = np.random.normal(size=(1, 224, 224, 3))
     tf_input = tf.constant(example_input, dtype=tf.float32)
     torch_input = torch.from_numpy(np.transpose(example_input, (0, 3, 1, 2))).float()
     tf_output = tf_model(tf_input)
-    torch_output = torch_model(torch_input)
+    torch_output = torch.softmax(torch_model(torch_input), dim=1)
     np.testing.assert_almost_equal(tf_output.numpy(), torch_output.detach().numpy())
