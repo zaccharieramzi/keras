@@ -237,7 +237,7 @@ for torch_model, tf_model in zip(
     tf_model.load_weights(f'{tf_model.name}.h5')
     example_input = np.random.normal(size=(1, 224, 224, 3))
     tf_input = tf.constant(example_input, dtype=tf.float32)
-    torch_input = torch.from_numpy(np.reshape(example_input, (1, 3, 224, 224))).float()
+    torch_input = torch.from_numpy(np.transpose(example_input, (0, 3, 1, 2))).float()
     tf_output = tf_model(tf_input)
     torch_output = torch_model(torch_input)
     np.testing.assert_almost_equal(tf_output.numpy(), torch_output.detach().numpy())
