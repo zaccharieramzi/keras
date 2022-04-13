@@ -252,7 +252,7 @@ for torch_model, tf_model in zip(
     def apply_conv_torch_weights_to_tf(tf_layer, torch_layer_name):
         tf_weights = tf_layer.get_weights()
         torch_weights = torch_weights_map[f'{torch_layer_name}.weight']
-        bias = tf_weights[1]
+        bias = np.zeros_like(tf_weights[1])
         reshaped_torch_weights = np.transpose(torch_weights.detach().numpy(), (2, 3, 1, 0))
         tf_layer.set_weights([reshaped_torch_weights, bias])
 
