@@ -249,18 +249,29 @@ for torch_model, tf_model in zip(
     }
     torch_weights_map.update(**torch_buffers_map)
 
-    def apply_conv_torch_weights_to_tf(tf_layer, torch_layer_name):
+    used_weights = []
+
+    def apply_conv_torch_weights_to_tf(tf_layer, torch_layer_name, used_weights):
         tf_weights = tf_layer.get_weights()
-        torch_weights = torch_weights_map[f'{torch_layer_name}.weight']
+        weights_name = f'{torch_layer_name}.weight'
+        torch_weights = torch_weights_map[weights_name]
+        used_weights.append(weights_name)
         bias = np.zeros_like(tf_weights[1])
         reshaped_torch_weights = np.transpose(torch_weights.detach().numpy(), (2, 3, 1, 0))
         tf_layer.set_weights([reshaped_torch_weights, bias])
+        return used_weights
 
-    def apply_bn_torch_weights_to_tf(tf_layer, torch_layer_name):
+    def apply_bn_torch_weights_to_tf(tf_layer, torch_layer_name, used_weights):
         torch_bias = torch_weights_map[f'{torch_layer_name}.bias']
         torch_scale = torch_weights_map[f'{torch_layer_name}.weight']
         torch_mean = torch_weights_map[f'{torch_layer_name}.running_mean']
         torch_var = torch_weights_map[f'{torch_layer_name}.running_var']
+        used_weights = used_weights + [
+            f'{torch_layer_name}.bias',
+            f'{torch_layer_name}.weight',
+            f'{torch_layer_name}.running_mean',
+            f'{torch_layer_name}.running_var',
+        ]
         # order for tf bn weights is
         # ['conv1_bn/gamma:0', 'conv1_bn/beta:0', 'conv1_bn/moving_mean:0', 'conv1_bn/moving_variance:0']
         # and according to the docs, gamma is the scale and beta is the bias
@@ -271,6 +282,7 @@ for torch_model, tf_model in zip(
             torch_mean.detach().numpy(),
             torch_var.detach().numpy(),
         ])
+        return used_weights
 
     for layer in tf_model.layers:
         weights = layer.get_weights()
@@ -288,26 +300,28 @@ for torch_model, tf_model in zip(
                     else:
                         # downsampling layer
                         torch_layer_name += '.downsample.0'
-                    apply_conv_torch_weights_to_tf(layer, torch_layer_name)
+                    used_weights = apply_conv_torch_weights_to_tf(layer, torch_layer_name, used_weights)
                 elif layer_type == 'bn':
                     if int(i_conv) > 0:
                         torch_layer_name += f'.bn{i_conv}'
                     else:
                         # downsampling layer
                         torch_layer_name += '.downsample.1'
-                    apply_bn_torch_weights_to_tf(layer, torch_layer_name)
+                    used_weights = apply_bn_torch_weights_to_tf(layer, torch_layer_name, used_weights)
                 else:
                     raise ValueError(f'Unknown layer type: {layer_type}')
             else:
                 if layer_type == 'conv':
-                    apply_conv_torch_weights_to_tf(layer, 'conv1')
+                    used_weights = apply_conv_torch_weights_to_tf(layer, 'conv1', used_weights)
                 elif layer_type == 'bn':
-                    apply_bn_torch_weights_to_tf(layer, 'bn1')
+                    used_weights = apply_bn_torch_weights_to_tf(layer, 'bn1', used_weights)
                 elif layer_type == 'predictions':
                     torch_weights = torch_weights_map['fc.weight']
                     reshaped_torch_weights = np.transpose(torch_weights.detach().numpy(), (1, 0))
                     torch_bias = torch_weights_map['fc.bias']
                     layer.set_weights([reshaped_torch_weights, torch_bias.detach().numpy()])
+                    used_weights = used_weights + ['fc.weight', 'fc.bias']
                 else:
                     raise ValueError(f'Unknown layer type: {layer_type} for 1st conv')
+    assert len(used_weights) == len([w for w in torch_weights_map if 'tracked' not in w])
     tf_model.save_weights(f'{tf_model.name}.h5')
