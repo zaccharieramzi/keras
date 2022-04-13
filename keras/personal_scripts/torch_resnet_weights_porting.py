@@ -1,5 +1,6 @@
 from keras.applications.resnet import ResNet
 from keras import layers
+import numpy as np
 from torchsummary import summary
 from torchvision import models
 
@@ -247,8 +248,66 @@ for torch_model, tf_model in zip(
         for name, param in torch_model.named_buffers()
     }
     torch_weights_map.update(**torch_buffers_map)
+
+    def apply_conv_torch_weights_to_tf(tf_layer, torch_layer_name):
+        tf_weights = tf_layer.get_weights()
+        torch_weights = torch_weights_map[f'{torch_layer_name}.weight']
+        bias = tf_weights[1]
+        reshaped_torch_weights = np.transpose(torch_weights.detach().numpy(), (2, 3, 1, 0))
+        tf_layer.set_weights([reshaped_torch_weights, bias])
+
+    def apply_bn_torch_weights_to_tf(tf_layer, torch_layer_name):
+        torch_bias = torch_weights_map[f'{torch_layer_name}.bias']
+        torch_scale = torch_weights_map[f'{torch_layer_name}.weight']
+        torch_mean = torch_weights_map[f'{torch_layer_name}.running_mean']
+        torch_var = torch_weights_map[f'{torch_layer_name}.running_var']
+        # order for tf bn weights is
+        # ['conv1_bn/gamma:0', 'conv1_bn/beta:0', 'conv1_bn/moving_mean:0', 'conv1_bn/moving_variance:0']
+        # and according to the docs, gamma is the scale and beta is the bias
+        # https://www.tensorflow.org/api_docs/python/tf/keras/layers/BatchNormalization
+        tf_layer.set_weights([
+            torch_scale.detach().numpy(),
+            torch_bias.detach().numpy(),
+            torch_mean.detach().numpy(),
+            torch_var.detach().numpy(),
+        ])
+
     for layer in tf_model.layers:
         weights = layer.get_weights()
         if weights:
-            import ipdb; ipdb.set_trace()
-
+            layer_ids = layer.name.split('_')
+            layer_type = layer_ids[-1]
+            if 'block' in layer.name:
+                i_layer = str(int(layer_ids[0][4:]) -1)
+                i_block = str(int(layer_ids[1][5:]) - 1)
+                i_conv = layer_ids[2]
+                torch_layer_name = f'layer{i_layer}.{i_block}'
+                if layer_type == 'conv':
+                    if int(i_conv) > 0:
+                        torch_layer_name += f'.conv{i_conv}'
+                    else:
+                        # downsampling layer
+                        torch_layer_name += '.downsample.0'
+                    apply_conv_torch_weights_to_tf(layer, torch_layer_name)
+                elif layer_type == 'bn':
+                    if int(i_conv) > 0:
+                        torch_layer_name += f'.bn{i_conv}'
+                    else:
+                        # downsampling layer
+                        torch_layer_name += '.downsample.1'
+                    apply_bn_torch_weights_to_tf(layer, torch_layer_name)
+                else:
+                    raise ValueError(f'Unknown layer type: {layer_type}')
+            else:
+                if layer_type == 'conv':
+                    apply_conv_torch_weights_to_tf(layer, 'conv1')
+                elif layer_type == 'bn':
+                    apply_bn_torch_weights_to_tf(layer, 'bn1')
+                elif layer_type == 'predictions':
+                    torch_weights = torch_weights_map['fc.weight']
+                    reshaped_torch_weights = np.transpose(torch_weights.detach().numpy(), (1, 0))
+                    torch_bias = torch_weights_map['fc.bias']
+                    layer.set_weights([reshaped_torch_weights, torch_bias.detach().numpy()])
+                else:
+                    raise ValueError(f'Unknown layer type: {layer_type} for 1st conv')
+    tf_model.save_weights(f'{tf_model.name}.h5')
