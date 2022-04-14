@@ -243,8 +243,10 @@ for model in [resnet18, resnet34]:
             tf.image.resize_with_crop_or_pad(tf.image.resize(x, (256, 256)), 224, 224),
             y,
         ),
+        num_parallel_calls=tf.data.experimental.AUTOTUNE,
     ).batch(
         64,
+        num_parallel_calls=tf.data.experimental.AUTOTUNE,
     ).map(
         lambda x, y: (
             tf.keras.applications.imagenet_utils.preprocess_input(
@@ -252,11 +254,12 @@ for model in [resnet18, resnet34]:
             ),
             tf.one_hot(y, 1000),
         ),
+        num_parallel_calls=tf.data.experimental.AUTOTUNE,
     )
     # evaluate model on ImageNet
     model.compile(
         loss='categorical_crossentropy',
         metrics=['accuracy', 'top_k_categorical_accuracy'],
     )
-    metrics = model.evaluate(ds.take(1), return_dict=True)
+    metrics = model.evaluate(ds, return_dict=True)
     print(model.name, metrics)
