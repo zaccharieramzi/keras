@@ -240,6 +240,7 @@ for model in [resnet18, resnet34]:
         lambda x, y: (
             # this taken from
             # https://vitalflux.com/pytorch-load-predict-pretrained-resnet-model/
+            # and https://pytorch.org/hub/pytorch_vision_resnet/
             tf.image.resize_with_crop_or_pad(tf.image.resize(x, (256, 256)), 224, 224),
             y,
         ),
